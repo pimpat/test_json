@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		9F0353941B64C5AC00F2E784 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9F0353931B64C5AC00F2E784 /* main.cpp */; settings = {COMPILER_FLAGS = "-I/Users/pimpat/Desktop/orientdb-binary(new) -I/Users/pimpat/Downloads/diff-match-patch-cpp-stl -I/usr/local/include -L/usr/local/lib/ -ljansson"; }; };
+		9F0353941B64C5AC00F2E784 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9F0353931B64C5AC00F2E784 /* main.cpp */; settings = {COMPILER_FLAGS = "-w -I/Users/pimpat/Downloads/diff-match-patch-cpp-stl -I/usr/local/include -L/usr/local/lib/ -ljansson"; }; };
 		9F03539B1B64C61A00F2E784 /* libjansson.4.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 9F03539A1B64C61A00F2E784 /* libjansson.4.dylib */; };
+		9F0353A41B673B9100F2E784 /* reqmsg.c in Sources */ = {isa = PBXBuildFile; fileRef = 9F0353A01B673B9100F2E784 /* reqmsg.c */; };
+		9F0353A51B673B9100F2E784 /* swap_endian.c in Sources */ = {isa = PBXBuildFile; fileRef = 9F0353A31B673B9100F2E784 /* swap_endian.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -27,6 +29,10 @@
 		9F0353901B64C5AC00F2E784 /* test_json */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = test_json; sourceTree = BUILT_PRODUCTS_DIR; };
 		9F0353931B64C5AC00F2E784 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		9F03539A1B64C61A00F2E784 /* libjansson.4.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libjansson.4.dylib; sourceTree = "<group>"; };
+		9F0353A01B673B9100F2E784 /* reqmsg.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = reqmsg.c; path = "../../orientdb-binary-new/reqmsg.c"; sourceTree = "<group>"; };
+		9F0353A11B673B9100F2E784 /* reqmsg.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = reqmsg.h; path = "../../orientdb-binary-new/reqmsg.h"; sourceTree = "<group>"; };
+		9F0353A21B673B9100F2E784 /* swap_endian.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = swap_endian.h; path = "../../orientdb-binary-new/swap_endian.h"; sourceTree = "<group>"; };
+		9F0353A31B673B9100F2E784 /* swap_endian.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = swap_endian.c; path = "../../orientdb-binary-new/swap_endian.c"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +67,10 @@
 		9F0353921B64C5AC00F2E784 /* test_json */ = {
 			isa = PBXGroup;
 			children = (
+				9F0353A01B673B9100F2E784 /* reqmsg.c */,
+				9F0353A11B673B9100F2E784 /* reqmsg.h */,
+				9F0353A21B673B9100F2E784 /* swap_endian.h */,
+				9F0353A31B673B9100F2E784 /* swap_endian.c */,
 				9F0353931B64C5AC00F2E784 /* main.cpp */,
 			);
 			path = test_json;
@@ -122,6 +132,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9F0353A41B673B9100F2E784 /* reqmsg.c in Sources */,
+				9F0353A51B673B9100F2E784 /* swap_endian.c in Sources */,
 				9F0353941B64C5AC00F2E784 /* main.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

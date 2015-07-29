@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>IDESourceControlProjectFavoriteDictionaryKey</key>
+	<false/>
+	<key>IDESourceControlProjectIdentifier</key>
+	<string>90C701CA-D716-4BA7-91C5-B8630B548C1A</string>
+	<key>IDESourceControlProjectName</key>
+	<string>test_json</string>
+	<key>IDESourceControlProjectOriginsDictionary</key>
+	<dict>
+		<key>A2A9B43469050B918549A31112B230AA0BC572AA</key>
+		<string>https://github.com/pimpat/orientdb.git</string>
+		<key>BADE196A8A6BB41D058D1D2E0B0376C2BA20CD28</key>
+		<string>https://github.com/pimpat/test_json.git</string>
+	</dict>
+	<key>IDESourceControlProjectPath</key>
+	<string>test_json.xcodeproj</string>
+	<key>IDESourceControlProjectRelativeInstallPathDictionary</key>
+	<dict>
+		<key>A2A9B43469050B918549A31112B230AA0BC572AA</key>
+		<string>../../../orientdb-binary-new</string>
+		<key>BADE196A8A6BB41D058D1D2E0B0376C2BA20CD28</key>
+		<string>../..</string>
+	</dict>
+	<key>IDESourceControlProjectURL</key>
+	<string>https://github.com/pimpat/test_json.git</string>
+	<key>IDESourceControlProjectVersion</key>
+	<integer>111</integer>
+	<key>IDESourceControlProjectWCCIdentifier</key>
+	<string>BADE196A8A6BB41D058D1D2E0B0376C2BA20CD28</string>
+	<key>IDESourceControlProjectWCConfigurations</key>
+	<array>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.git</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>A2A9B43469050B918549A31112B230AA0BC572AA</string>
+			<key>IDESourceControlWCCName</key>
+			<string>orientdb-binary-new</string>
+		</dict>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.git</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>BADE196A8A6BB41D058D1D2E0B0376C2BA20CD28</string>
+			<key>IDESourceControlWCCName</key>
+			<string>test_json</string>
+		</dict>
+	</array>
+</dict>
+</plist>

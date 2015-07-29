@@ -74,7 +74,9 @@ typedef struct DataContent{
     DataContent* preVersion;
     char* SHA256hashCode;
     CWTimeStamp* timeStamp;
-    ObjectBinary* objContent;
+    ObjectBinary* plusPatch;
+    ObjectBinary* minusPatch;
+    ObjectBinary* fullContent;
     t_bool isDiff;
 } DataContent;
 
@@ -115,7 +117,6 @@ int prepareDB();
 int openDatabase(char *dbName);
 int sendCommand(char *command);
 int queryRecord(char *query);
-int queryRecord_Binary(char *query);
 int loadRecord(short clusterId, long clusterPos);
 int createVertex(char *command);
 
@@ -127,6 +128,8 @@ char** getArrayRid(char* query);
 const char* stringUUID();
 const char* createNewData();
 DataHolder* createNewDataHolder();
+ObjectBinary* createNewObjBinary(char* data);
+int countDataContent(Data* data);
 
 ObjectBinary* getDataContent(Data* data);
 ObjectBinary* getDataContentLastestCommon(Data* data);
@@ -201,44 +204,633 @@ ReturnErr flushTrash(char* userID);
 /* diff-patch function */
 string getDiff(char* old_str, char* new_str);
 string getPatch(char* str, char* str_patch);
-char* getDataContentFirst(Data* data);
-char* getDataContentLast(Data* data);
-char* getDataContentVer(Data* data,int ver);
 
-ObjectBinary* createNewObjBinary(char* data);
-int countDataContent(Data* data);
+//char* getDataContentFirst(Data* data);
+//char* getDataContentLast(Data* data);
+//char* getDataContentVer(Data* data,int ver);
+
+
 void testDiffPatchJson();
 
 int main(){
+    int ret;
+//    prepareDB();
+    
+//    Sockfd = connectSocket();
+//    if (Sockfd < 0) return Sockfd;
+//    
+//    ret = openDatabase("test-list");
+//    if (ret!=0) {
+//        printf ("error openDatabase\n");
+//        return 1;
+//    }
+//    
+//    queryRecord("select * from Data");
+    
+//    disconnectServer();
+//    close(Sockfd);
+    
     testDiffPatchJson();
     
     return 0;
 }
 
-string getDiff(char* old_str, char* new_str){
-    diff_match_patch<wstring> dmp;
-    string s;
-    wstring strPatch;
-    wstring str1 = wstring(new_str,new_str+strlen(new_str));
-    //    wcout << str1 << endl;
-    wstring str0 = wstring(old_str,old_str+strlen(old_str));
-    //    wcout << str0 << endl;
-    strPatch = dmp.patch_toText(dmp.patch_make(str0, str1));
-    s.assign(strPatch.begin(),strPatch.end());
-    //    wcout << strPatch << endl;
-    return s;
+//----------------------------------------------------------------------------------------------------------
+
+int connectSocket() {
+    int sockfd;
+    struct sockaddr_in serv_addr;
+    
+    sockfd=socket(AF_INET, SOCK_STREAM, 0);
+    if ((sockfd) < 0) {
+        printf("Error: Could net create socket\n");
+        return sockfd;
+    }
+    
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERVER_PORT);
+    if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+        printf("inet_pton error occured\n");
+        return -1;
+    }
+    
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        printf("Error: Connect Failed\n");
+        return -1;
+    }
+    read(sockfd, &GPacket, 256);
+    
+    printf("Connect Socket OK\n");
+    
+    return sockfd;
 }
 
-string getPatch(char* str, char* str_patch){
-    diff_match_patch<wstring> dmp;
-    string s;
-    wstring strResult;
-    strResult = wstring(str,str+strlen(str));
-    pair<wstring, vector<bool> > out
-    = dmp.patch_apply(dmp.patch_fromText(wstring(str_patch,str_patch+strlen(str_patch))), strResult);
-    strResult = out.first;
-    return s.assign(strResult.begin(),strResult.end());
+int connectServer() {
+    int ret, size;
+    GPacket.opType = REQUEST_CONNECT;
+    *(int *)GPacket.ssid = -1;
+    size = reqConnectMsg(GPacket.msg, NULL, NULL, 28, NULL, "root", "pimpat");
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5+sizeof(int));
+    if (ret<0 || GPacket.opType!=0) return 1;
+    
+    // copy ssid
+    memcpy(GPacket.ssid, GPacket.msg, 4);
+    int ssid = *(int *)GPacket.ssid;
+    swapEndian(&ssid, INT);
+    printf("ssid: %d\n", ssid);
+    
+    //  for version 28
+    int token;
+    ret = read(Sockfd, &token, 4);
+    
+    return 0;
 }
+
+int disconnectServer() {
+    int ret, size;
+    GPacket.opType = 5;
+    size = reqDBCloseMsg(GPacket.msg);
+    ret = write(Sockfd, &GPacket, 5+size);
+    return 0;
+}
+
+int createDatabase(char *dbName) {
+    int ret, size;
+    GPacket.opType = REQUEST_DB_CREATE;
+    size = reqDBCreateMsg(GPacket.msg, dbName, "graph", "plocal");
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5+0);
+    if (ret<0 || GPacket.opType!=0) return 1;
+    
+    printf("CREATE DATABASE '%s' plocal: OK!\n", dbName);
+    return 0;
+}
+
+int createClass(char *myclass, char *extend) {
+    int ret;
+    char command[256];
+    sprintf(command, "CREATE CLASS %s EXTENDS %s", myclass, extend);
+    ret = sendCommand(command);
+    if (ret!=0) return 1;
+    
+    printf("%s: OK!\n", command);
+    return 0;
+}
+
+int createRecord(int cltId, char* recContent){
+    int ret, size;
+    GPacket.opType = REQUEST_RECORD_CREATE;
+    size = reqRecCreateMsg(GPacket.msg, cltId, recContent);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5+0);
+    if (ret<0 || GPacket.opType!=0) return 1;
+    
+    short clusterId;
+    read(Sockfd, &clusterId, sizeof(short));
+    swapEndian(&clusterId, SHORT);
+    printf("clusterId: %d\n", clusterId);
+    
+    long clusterPos;
+    read(Sockfd, &clusterPos, sizeof(long));
+    swapEndian(&clusterPos, LONG);
+    printf("clusterPos: %d\n", clusterPos);
+    
+    int recVersion;
+    read(Sockfd, &recVersion, sizeof(int));
+    swapEndian(&recVersion, INT);
+    printf("record-version: %d\n", recVersion);
+    
+    int count_of_changes;
+    read(Sockfd, &count_of_changes, sizeof(int));
+    swapEndian(&count_of_changes, INT);
+    printf("count_of_changes: %d\n", count_of_changes);
+    
+    return 0;
+}
+
+int prepareDB() {
+    int ret;
+    
+    Sockfd = connectSocket();
+    if (Sockfd < 0) return Sockfd;
+    printf("connectSocket..PASS\n");
+    ret = connectServer();
+    if (ret!=0) return 1;
+    printf("connectServer...PASS\n");
+    
+    ret = createDatabase(DB_NAME);
+    if (ret!=0) return 1;
+    printf("createDB...PASS\n");
+    
+    /* Edge toUser */
+    ret = createClass("toUser","E");
+    if (ret!=0) return 1;
+    
+    /* Edge toCategory */
+    ret = createClass("toCategory","E");
+    if (ret!=0) return 1;
+    
+    /* Edge toState */
+    ret = createClass("toState","E");
+    if (ret!=0) return 1;
+    
+    /* Edge toTask */
+    ret = createClass("toTask","E");
+    if (ret!=0) return 1;
+    
+    /* Edge toSubTask */
+    ret = createClass("toSubTask","E");
+    if (ret!=0) return 1;
+    
+    /* Edge toAttachmentFTOLinks */
+    ret = createClass("toAttachmentFTOLinks","E");
+    if (ret!=0) return 1;
+    
+    /* Data */
+    ret = createClass("Data","V");
+    if (ret!=0) return 1;
+    
+    ret = sendCommand("CREATE PROPERTY Data.dataID STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY Data.dataID STRING: OK!\n");
+    
+    ret = sendCommand("CREATE PROPERTY Data.dataType INTEGER");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY Data.dataType INTEGER: OK!\n");
+    
+    ret = sendCommand("CREATE PROPERTY Data.attachmentFTOLinks EMBEDDEDLIST STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY Data.attachmentFTOLinks EMBEDDEDLIST STRING: OK!\n");
+    
+    ret = sendCommand("CREATE PROPERTY Data.chatRoom STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY Data.chatRoom STRING: OK!\n");
+    
+    /* Edge toDataHolder */
+    ret = createClass("toDataHolder","E");
+    if (ret!=0) return 1;
+    
+    /* DataHolder */
+    ret = createClass("DataHolder","V");
+    if (ret!=0) return 1;
+
+    ret = sendCommand("CREATE PROPERTY DataHolder.versionKeeped INTEGER");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY DataHolder.versionKeeped INTEGER: OK!\n");
+    
+    /* Edge toDataContent */
+    ret = createClass("toDataContent","E");
+    if (ret!=0) return 1;
+    
+    ret = sendCommand("CREATE PROPERTY toDataContent.type STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY toDataContent.type STRING: OK!\n");
+    
+    /* DataContent */
+    ret = createClass("DataContent","V");
+    if (ret!=0) return 1;
+    
+    ret = sendCommand("CREATE PROPERTY DataContent.SHA256hashCode STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY DataContent.SHA256hashCode STRING: OK!\n");
+    
+    ret = sendCommand("CREATE PROPERTY DataContent.timeStamp STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY DataContent.timeStamp STRING: OK!\n");
+    
+    ret = sendCommand("CREATE PROPERTY DataContent.isDiff BOOLEAN");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY DataContent.isDiff BOOLEAN: OK!\n");
+    
+    //  minusPatch
+    ret = sendCommand("CREATE PROPERTY DataContent.minus_schemaCode INTEGER");
+    if (ret!=0) return 1;
+    ret = sendCommand("CREATE PROPERTY DataContent.minus_byteCount INTEGER");
+    if (ret!=0) return 1;
+    ret = sendCommand("CREATE PROPERTY DataContent.minus_data STRING");
+    if (ret!=0) return 1;
+    
+    //  plusPatch
+    ret = sendCommand("CREATE PROPERTY DataContent.plus_schemaCode INTEGER");
+    if (ret!=0) return 1;
+    ret = sendCommand("CREATE PROPERTY DataContent.plus_byteCount INTEGER");
+    if (ret!=0) return 1;
+    ret = sendCommand("CREATE PROPERTY DataContent.plus_data STRING");
+    if (ret!=0) return 1;
+    
+    //  fullContent
+    ret = sendCommand("CREATE PROPERTY DataContent.full_schemaCode INTEGER");
+    if (ret!=0) return 1;
+    ret = sendCommand("CREATE PROPERTY DataContent.full_byteCount INTEGER");
+    if (ret!=0) return 1;
+    ret = sendCommand("CREATE PROPERTY DataContent.full_data STRING");
+    if (ret!=0) return 1;
+    
+    /* Edge toObjectBinary */
+    ret = createClass("toObjectBinary","E");
+    if (ret!=0) return 1;
+    
+    ret = sendCommand("CREATE PROPERTY toObjectBinary.type STRING");
+    if (ret!=0) return 1;
+    //printf("CREATE PROPERTY toObjectBinary.type STRING: OK!\n");
+    
+    /* Edge toDataHolder_fromDC */
+    ret = createClass("toDataHolder_fromDC","E");
+    if (ret!=0) return 1;
+    
+    //  alter class
+    ret = sendCommand("ALTER DATABASE CUSTOM useLightweightEdges=false");
+    if (ret!=0) return 1;
+    printf("ALTER DATABASE CUSTOM useLightweightEdges=false: OK!\n");
+    
+    disconnectServer();
+    close(Sockfd);
+    
+    printf("prepareDB...PASS\n");
+    return 0;
+}
+
+int openDatabase(char *dbName) {
+    printf("Opening Database...\n");
+    int ret, size, i;
+    GPacket.opType = REQUEST_DB_OPEN;
+    *(int *)GPacket.ssid = -1;
+    size = reqDBOpenMsg(GPacket.msg, NULL, NULL, 28, NULL, dbName, "graph", "root", "pimpat");
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5+sizeof(int));
+    printf("resSize: %d\n", ret);
+    printf("resCode: %d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0) return 1;
+    
+    // copy ssid
+    memcpy(GPacket.ssid, GPacket.msg, 4);
+    int ssid = *(int *)GPacket.ssid;
+    swapEndian(&ssid, INT);
+    printf("ssid: %d\n", ssid);
+    
+    //  for version 28
+    int token;
+    ret = read(Sockfd, &token, 4);
+    
+    //  copy num-of-clusters
+    short nCluster;
+    ret = read(Sockfd, &nCluster, sizeof(short));
+    swapEndian(&nCluster, SHORT);
+    printf("num-of-clusters: %hd\n", nCluster);
+    
+    for (i=0; i<nCluster; i++) {
+        char name[128];
+        //char type[32];
+        short id;//, dataSeg;
+        
+        //  read info classes
+        read(Sockfd, &size, sizeof(int));
+        swapEndian(&size, INT);
+        read(Sockfd, name, size);
+        name[size] = '\0';
+        read(Sockfd, &id, sizeof(short));
+        swapEndian(&id, SHORT);
+        
+        //        read(Sockfd, &size, sizeof(int));
+        //        swapEndian(&size, INT);
+        //        read(Sockfd, type, size);
+        //        type[size] = '\0';
+        //        read(Sockfd, &dataSeg, sizeof(short));
+        //        swapEndian(&dataSeg, SHORT);
+        //        printf("name:'%s'\t id:%hd\t type:%s\t dataSeg:%hd\n", name, id, type, dataSeg);
+        
+        //  for version 28
+        printf("name:'%s'\t id:%hd\n", name, id);
+    }
+    
+    read(Sockfd, &size, sizeof(int));
+    swapEndian(&size, INT);
+    if (size > 0) {
+        char clusterConfig[size];
+        read(Sockfd, clusterConfig, size);
+        //clusterConfig[size]='\0';
+    }
+    
+    read(Sockfd, &size, sizeof(int));
+    swapEndian(&size, INT);
+    if (size > 0) {
+        char orientRelease[size+1];
+        read(Sockfd, orientRelease, size);
+        orientRelease[size] = '\0';
+        printf("%s\n", orientRelease);
+    }
+    return 0;
+}
+
+int sendCommand(char *command) {
+    int ret, size;
+    GPacket.opType = REQUEST_COMMAND;
+    size = reqCommandMsg(GPacket.msg, "c", command);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5+256);
+    //printf("opType:%d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0)
+        return 1;
+    else
+        return 0;
+}
+
+int queryRecord(char *query) {
+    int i, ret, size, total;
+    GPacket.opType = REQUEST_COMMAND;
+    size = reqQueryMsg(GPacket.msg, "q", query);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5);
+    //printf("ret:%d\n", ret);
+    printf("opType:%d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0) return 1;
+    
+    read(Sockfd, &GPacket.msg, 1);
+    read(Sockfd, &total, 4);
+    swapEndian(&total, INT);
+    printf("total: %d\n",total);    // total record
+    read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    //read(Sockfd, &GPacket.msg, 1+4+2+1+2+8+4);
+    
+    for(i=0;i<total;i++){
+        read(Sockfd, &size, 4);
+        swapEndian(&size, INT);
+        printf("[%d]--------------------------------------------------\n",i);
+        printf("size: %d\t",size);
+        
+        //  read content
+        read(Sockfd, GPacket.msg, size);
+        GPacket.msg[size]='\0';
+        printf("msg: %.*s\n",size,GPacket.msg);
+        //printf("len: %d\n", strlen(GPacket.msg));
+        read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    }
+    
+    return 0;
+}
+
+int loadRecord(short clusterId, long clusterPos) {
+    int ret, size;
+    GPacket.opType = REQUEST_RECORD_LOAD;
+    size = reqRecLoadMsg(GPacket.msg, clusterId, clusterPos);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5);
+    //printf("ret:%d\n", ret);
+    printf("opType:%d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0) return 1;
+    
+    char payloadStatus;
+    read(Sockfd, &payloadStatus, sizeof(char));
+    printf("status:%hhu\n", payloadStatus);
+    
+    char recType;
+    read(Sockfd, &recType, sizeof(char));
+    printf("record-type: %c\n", recType);
+    
+    int recVersion;
+    read(Sockfd, &recVersion, sizeof(int));
+    swapEndian(&recVersion, INT);
+    printf("record-version: %d\n", recVersion);
+    
+    //  read content
+    read(Sockfd, &size, sizeof(int));
+    swapEndian(&size, INT);
+    printf("size: %d\n",size);
+    
+    char content[size+1];
+    read(Sockfd, content, size);
+    content[size] = '\0';
+    printf("content:'%s'\n", content);
+    
+    return 0;
+}
+
+int createVertex(char *command){
+    int ret, size;
+    int in_size;
+    GPacket.opType = REQUEST_COMMAND;
+    size = reqCommandMsg(GPacket.msg, "c", command);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5+1+2+1);
+    if (ret<0 || GPacket.opType!=0){
+        //printf("createVertex..FAILED\n");
+        return 1;
+    }
+    else{
+        ret = read(Sockfd, &addr.cltid, 2);
+        if (ret<0) return 1;
+        swapEndian(&addr.cltid, SHORT);
+        ret = read(Sockfd, &addr.rid, 8);
+        if (ret<0) return 1;
+        swapEndian(&addr.rid, LONG);
+        printf("@rid #%d:%lu\n",addr.cltid,addr.rid);
+        
+        read(Sockfd, &in_size, 4);
+        read(Sockfd, &in_size, 4);
+        swapEndian(&in_size, INT);
+        //printf("in_size: %d\n",in_size);
+        
+        ret = read(Sockfd,&GPacket.msg,in_size+1);
+        if (ret<0) return 1;
+        return 0;
+    }
+}
+
+char* getRid(char *query) {
+    int i, ret, size, total;
+    GPacket.opType = REQUEST_COMMAND;
+    size = reqQueryMsg(GPacket.msg, "q", query);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5);
+    //printf("ret:%d\n", ret);
+    printf("opType:%d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0){
+        printf("getRid error\n");
+        return NULL;
+    }
+    
+    read(Sockfd, &GPacket.msg, 1);
+    read(Sockfd, &total, 4);
+    swapEndian(&total, INT);
+    printf("total: %d\n",total);    // total record
+    read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    //read(Sockfd, &GPacket.msg, 1+4+2+1+2+8+4);
+    
+    if(total==0){
+        printf("FAILED >> data not found\n");
+        return NULL;
+    }
+    
+    char myResult[20];
+    char* str;
+    char* token;
+    char delim[2] = "#";
+    //char* str = (char*)malloc(sizeof(char)*10);   (fix)
+    
+    for(i=0;i<total;i++){
+        read(Sockfd, &size, 4);
+        swapEndian(&size, INT);
+        //printf("[%d]--------------------------------------------------\n",i);
+        //printf("size: %d\t",size);
+        
+        //  read content
+        read(Sockfd, GPacket.msg, size);
+        GPacket.msg[size]='\0';
+        sprintf(myResult,"%s",GPacket.msg);
+        printf("size: %lu\t",strlen(myResult));
+        printf("msg: %s\n", myResult);
+        token = strtok(myResult, delim);
+        token = strtok(NULL, delim);
+        //printf("result_token: %s\n", token);
+        str = strdup(token);
+        //sprintf(str,"%s",token);  (fix)
+        read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    }
+    printf("@rid #%s\n",str);
+    return str;
+}
+
+char* getContent(char *query) {
+    int i, ret, size, total;
+    GPacket.opType = REQUEST_COMMAND;
+    size = reqQueryMsg(GPacket.msg, "q", query);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5);
+    printf("opType:%d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0) {
+        printf("getContent error\n");
+        return NULL;
+    }
+    
+    read(Sockfd, &GPacket.msg, 1);
+    read(Sockfd, &total, 4);
+    swapEndian(&total, INT);
+    printf("total: %d\n",total);    // total record
+    read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    
+    if(total==0)
+        return NULL;
+    
+    char* str = (char*)malloc(sizeof(char)*MAX_CONTENT_SIZE);
+    
+    //for(i=0;i<total;i++){
+    read(Sockfd, &size, 4);
+    swapEndian(&size, INT);
+    printf("size: %d\n",size);
+    read(Sockfd, str, size);
+    str[size]='\0';
+    printf("msg: %s\n",str);
+    read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    printf("[result from getContent]---------------\n",i);
+    //}
+    //printf("result(in): %s\n",str);
+    return str;
+}
+
+char** getArrayRid(char* query){
+    int i, ret, size, total;
+    GPacket.opType = REQUEST_COMMAND;
+    size = reqQueryMsg(GPacket.msg, "q", query);
+    ret = write(Sockfd, &GPacket, 5+size);
+    
+    ret = read(Sockfd, &GPacket, 5);
+    //printf("ret:%d\n", ret);
+    printf("opType:%d\n", GPacket.opType);
+    if (ret<0 || GPacket.opType!=0) {
+        printf("FAILED >> getArrayRid\n");
+        return NULL;
+    }
+    
+    read(Sockfd, &GPacket.msg, 1);
+    read(Sockfd, &total, 4);
+    swapEndian(&total, INT);
+    printf("total: %d\n",total);    // total record
+    read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    
+    if(total==0)
+        return NULL;
+    
+    char **result_rid = (char**)malloc(sizeof(char*)*total+1);
+    
+    for(i=0;i<total;i++){
+        read(Sockfd, &size, 4);
+        swapEndian(&size, INT);
+        printf("[%d]--------------------------------------------------\n",i);
+        printf("size: %d\t",size);
+        result_rid[i] = (char*)malloc(sizeof(char)*size-3);
+        
+        //  read content
+        read(Sockfd, &GPacket.msg, 4);
+        read(Sockfd, &GPacket.msg, size-4);
+        GPacket.msg[size-4]='\0';
+        printf("msg: %s\n", GPacket.msg);
+        sprintf(result_rid[i],"%s",GPacket.msg);
+        //printf("len: %d\n",strlen(result_rid[i]));
+        printf("myrid: %s\n",result_rid[i]);
+        read(Sockfd, &GPacket.msg, 2+1+2+8+4);
+    }
+    result_rid[i] = NULL;
+    
+    //    for(i=0;result_rid[i]!=NULL;i++) {
+    //        printf("TEST_rid: %s\n",result_rid[i]);
+    //    }
+    
+    return result_rid;
+}
+
+//----------------------------------------------------------------------------------------------------------
 
 const char *stringUUID(){
     char hex_char [] = "0123456789ABCDEF";
@@ -301,10 +893,11 @@ int countDataContent(Data* data){
 int setNewDataContent(Data* data, ObjectBinary* content){
     if(data->content->head==NULL && data->content->lastestCommon==NULL){
         printf("\n[ DATA #1 ]\n");
-        
+        //  {}
         DataContent* dc0 = (DataContent*)malloc(sizeof(DataContent));
+        
+        //  (none) +A {A}
         DataContent* dc1 = (DataContent*)malloc(sizeof(DataContent));
-        DataContent* dc1_1 = (DataContent*)malloc(sizeof(DataContent));
         
         DataHolder* dh = data->content;
         dh->lastestCommon = dc0;
@@ -314,110 +907,192 @@ int setNewDataContent(Data* data, ObjectBinary* content){
         dc0->preVersion = NULL;
         dc0->nextVersion = dc1;
         dc1->preVersion = dc0;
-        dc1->nextVersion = dc1_1;
-        dc1_1->preVersion = NULL;
-        dc1_1->nextVersion = NULL;
+        dc1->nextVersion = NULL;
         
-        //  dc0
+        //  dc0 ------------------------------------------------------------
         dc0->dataHd = dh;
         dc0->SHA256hashCode = strdup("default");
         dc0->timeStamp = NULL;
-        dc0->isDiff = TRUE;
+        dc0->isDiff = FALSE;
         
+        //  dc0->fullContent
         ObjectBinary* obj0 = (ObjectBinary*)malloc(sizeof(ObjectBinary));
-        dc0->objContent = obj0;
+        dc0->fullContent = obj0;
         obj0->schemaCode = content->schemaCode;
         obj0->data = strdup("{}");
         obj0->byteCount = (int)strlen(obj0->data);
         
-        //  dc1
+        //  dc0->minusPatch
+        dc0->minusPatch = NULL;
+        
+        //  dc0->plusPatch
+        dc0->plusPatch = NULL;
+        
+        //  dc1 ------------------------------------------------------------
         dc1->dataHd = dh;
         dc1->SHA256hashCode = strdup("default");
         dc1->timeStamp = NULL;
         dc1->isDiff = FALSE;
         
-        ObjectBinary* obj1 = (ObjectBinary*)malloc(sizeof(ObjectBinary));
-        dc1->objContent = obj1;
-        obj1->schemaCode = content->schemaCode;
-        obj1->data = strdup(content->data);
-        obj1->byteCount = content->byteCount;
+        //  dc1->fullContent
+        ObjectBinary* obj1_full = (ObjectBinary*)malloc(sizeof(ObjectBinary));
+        dc1->fullContent = obj1_full;
+        obj1_full->schemaCode = content->schemaCode;
+        obj1_full->data = strdup(content->data);
+        obj1_full->byteCount = content->byteCount;
         
-        //  dc1_1
-        dc1_1->dataHd = NULL;
-        dc1_1->SHA256hashCode = strdup("default");
-        dc1_1->timeStamp = NULL;
-        dc1_1->isDiff = TRUE;
+        //  dc1->minusPatch
+        dc1->minusPatch = NULL;
         
-        ObjectBinary* obj1_1 = (ObjectBinary*)malloc(sizeof(ObjectBinary));
-        dc1_1->objContent = obj1_1;
-        obj1_1->schemaCode = content->schemaCode;
+        //  dc1->plusPatch
+        ObjectBinary* obj1_plus = (ObjectBinary*)malloc(sizeof(ObjectBinary));
+        dc1->plusPatch = obj1_plus;
+
+        obj1_plus->schemaCode = content->schemaCode;
         
-        string s = getDiff(obj0->data,obj1->data);
-        obj1_1->data = strdup(s.c_str());
-        obj1_1->byteCount = (int)strlen(obj1_1->data);
+        string s = getDiff(obj0->data,obj1_full->data);
+        obj1_plus->data = strdup(s.c_str());
+        obj1_plus->byteCount = (int)strlen(obj1_plus->data);
         
         printf("init: %s\n",obj0->data);
-        printf("new: %s\n",obj1->data);
-        printf("diff: %s\n",obj1_1->data);
+        printf("new: %s\n",obj1_full->data);
+        printf("diff: %s\n",obj1_plus->data);
         
-        return obj1->byteCount;
+        return obj1_plus->byteCount;
         
     }
     else{
         int total = countDataContent(data);
         printf("\n[ DATA #%d ]\n",total);
         
-        DataContent* dc1 = data->content->head;
-        DataContent* dc1_1 = data->content->head->nextVersion;
-        DataContent* dc_new = (DataContent*)malloc(sizeof(DataContent));
+        DataContent* dc0 = data->content->head;                             //  old
+        DataContent* dc1 = (DataContent*)malloc(sizeof(DataContent));       //  new
         
         DataHolder* dh = data->content;
         dh->head = dc1;
         dh->current = dc1;
         
-        printf("old: %s\n",dc1->objContent->data);
+        printf("old: %s\n",dc0->fullContent->data);
         printf("new: %s\n",content->data);
-        string s = getDiff(dc1->objContent->data,content->data);
         
-        DataContent* dc0 = dc1->preVersion;
-        dc0->nextVersion = dc1_1;
-        dc1_1->preVersion = dc0;
-        dc1_1->nextVersion = dc1;
-        dc1->preVersion = dc1_1;
-        dc1->nextVersion = dc_new;
-        dc_new->preVersion = NULL;
-        dc_new->nextVersion = NULL;
+        string s_plus = getDiff(dc0->fullContent->data,content->data);
+        string s_minus = getDiff(content->data,dc0->fullContent->data);
+        printf("s_plus: %s\n",s_plus.c_str());
+        printf("s_minus: %s\n",s_minus.c_str());
         
-        //  dc1
+        dc0->nextVersion = dc1;
+        dc1->preVersion = dc0;
+        dc1->nextVersion = NULL;
+        
+        //  dc0 ------------------------------------------------------------
+        dc0->isDiff = TRUE;
+        
+        //  dc0->fullPatch
+        free(dc0->fullContent->data);
+        free(dc0->fullContent);
+        dc0->fullContent = NULL;
+        
+        //  dc0->minusPatch
+        ObjectBinary* obj0_minus = (ObjectBinary*)malloc(sizeof(ObjectBinary));
+        dc0->minusPatch = obj0_minus;
+        obj0_minus->schemaCode = content->schemaCode;
+        obj0_minus->data = strdup(s_minus.c_str());
+        obj0_minus->byteCount = (int)strlen(obj0_minus->data);
+        
+        //  dc0->plusPatch (not change)
+        
+        //  dc1 ------------------------------------------------------------
         dc1->dataHd = dh;
         dc1->SHA256hashCode = strdup("default");
         dc1->timeStamp = NULL;
         dc1->isDiff = FALSE;
         
-        free(dc1->objContent->data);
-        dc1->objContent->schemaCode = content->schemaCode;
-        dc1->objContent->data = strdup(content->data);
-        dc1->objContent->byteCount = content->byteCount;
+        //  dc1->fullContent
+        ObjectBinary* obj1_full = (ObjectBinary*)malloc(sizeof(ObjectBinary));
+        dc1->fullContent = obj1_full;
+        obj1_full->schemaCode = content->schemaCode;
+        obj1_full->data = strdup(content->data);
+        obj1_full->byteCount = content->byteCount;
         
-        //  dc_new
-        dc_new->dataHd = NULL;
-        dc_new->SHA256hashCode = strdup("default");
-        dc_new->timeStamp = NULL;
-        dc_new->isDiff = TRUE;
+        //  dc1->minusPatch
+        dc1->minusPatch = NULL;
         
-        ObjectBinary* obj_new = (ObjectBinary*)malloc(sizeof(ObjectBinary));
-        dc_new->objContent = obj_new;
+        //  dc1->plusPatch
+        ObjectBinary* obj1_plus = (ObjectBinary*)malloc(sizeof(ObjectBinary));
+        dc1->plusPatch = obj1_plus;
+        obj1_plus->schemaCode = content->schemaCode;
+        obj1_plus->data = strdup(s_plus.c_str());
+        obj1_plus->byteCount = (int)strlen(obj1_plus->data);
         
-        obj_new->schemaCode = content->schemaCode;
-        obj_new->data = strdup(s.c_str());
-        obj_new->byteCount = (int)strlen(obj_new->data);
-        
-        return dc1->objContent->byteCount;
+        return obj1_plus->byteCount;
     }
+}
+
+ReturnErr setNewDataDiffWithTag(Data* data, char* tagName, Text diff){
+    int ret;
+    DataContent* dc_old = data->content->head;
+    printf("test\n\n\n\n");
+    json_t *root = json_loads(dc_old->fullContent->data,JSON_PRESERVE_ORDER,NULL);
+    json_t *result = json_object_get(root,tagName);
+    int mytype = json_typeof(result);
     
+    char* myresult = (char*)json_string_value(result);
+    
+    string s = getPatch(myresult, diff);
+    char* newresult = strdup(s.c_str());
+    printf("newresult: %s\n",newresult);
+    
+    json_object_set(root, tagName, json_string(newresult));
+    char* ret_string = json_dumps(root,JSON_INDENT(2));
+    printf("ret_string(setdiff): %s\n",ret_string);
+    
+    json_decref(root);
+    
+    ObjectBinary* objB = (ObjectBinary*)malloc(sizeof(ObjectBinary));
+    objB->data = ret_string;
+    objB->schemaCode = 0;
+    objB->byteCount = strlen(ret_string);
+    
+    ret = setNewDataContent(data, objB);
+    return ret;
+}
+
+string getDiff(char* old_str, char* new_str){
+    diff_match_patch<wstring> dmp;
+    string s;
+    wstring strPatch;
+    wstring str1 = wstring(new_str,new_str+strlen(new_str));
+    //    wcout << str1 << endl;
+    wstring str0 = wstring(old_str,old_str+strlen(old_str));
+    //    wcout << str0 << endl;
+    strPatch = dmp.patch_toText(dmp.patch_make(str0, str1));
+    s.assign(strPatch.begin(),strPatch.end());
+    //    wcout << strPatch << endl;
+    return s;
+}
+
+string getPatch(char* str, char* str_patch){
+    diff_match_patch<wstring> dmp;
+    string s;
+    wstring strResult;
+    strResult = wstring(str,str+strlen(str));
+    pair<wstring, vector<bool> > out
+    = dmp.patch_apply(dmp.patch_fromText(wstring(str_patch,str_patch+strlen(str_patch))), strResult);
+    strResult = out.first;
+    return s.assign(strResult.begin(),strResult.end());
 }
 
 void testDiffPatchJson(){
+    
+    json_t *root1, *root2;
+    root1 = json_pack_ex(NULL,JSON_SORT_KEYS,"{s: [{s: i}, {s: i}],s:s}", "data", "value2", 15, "value3", 16,"val","number");
+    root2 = json_pack_ex(NULL,JSON_SORT_KEYS,"{s:s,s: [{s: i}, {s: i}]}","val","number", "data", "value3", 16, "value2", 15);
+    
+    char* ret1 = json_dumps(root1,JSON_SORT_KEYS);
+    printf("%s\n",ret1);
+    char* ret2 = json_dumps(root2,JSON_SORT_KEYS);
+    printf("%s\n",ret2);
+    
     const char* uuid_data;
     uuid_data = createNewData();
     
@@ -450,25 +1125,28 @@ void testDiffPatchJson(){
     json_object_set( root, "age", json_integer(age[2]));
     ret_strings3 = json_dumps(root,JSON_INDENT(2));
     ObjectBinary* obj3 = createNewObjBinary(ret_strings3);
+    
+    json_decref(root);
 
 //    int total = countDataContent(mydata);
 //    printf("total(0): %d\n",total);
     setNewDataContent(mydata,obj1);
-    setNewDataContent(mydata,obj2);
     
     /* Test Patch */
     printf("\nTest Patch --------------------------------\n\n");
     
-    printf("init1: %s\n",ret_strings);
-    printf("diff1: %s\n",mydata->content->head->nextVersion->objContent->data);
-    string s = getPatch(ret_strings, mydata->content->head->nextVersion->objContent->data);
+    printf("init1: %s\n","{}");
+    printf("diff1: %s\n",mydata->content->head->plusPatch->data);
+    string s = getPatch("{}", mydata->content->head->plusPatch->data);
     char* res = strdup(s.c_str());
     printf("res: %s\n\n",res);
-
-    setNewDataContent(mydata,obj3);
+    
+    setNewDataContent(mydata,obj2);
+    
+//    setNewDataContent(mydata,obj3);
     printf("\ninit2: %s\n",res);
-    printf("diff2: %s\n",mydata->content->head->nextVersion->objContent->data);
-    string s2 = getPatch(res, mydata->content->head->nextVersion->objContent->data);
+    printf("diff2: %s\n",mydata->content->head->plusPatch->data);
+    string s2 = getPatch(res, mydata->content->head->plusPatch->data);
     char* res2 = strdup(s2.c_str());
     printf("res2: %s\n\n",res2);
     
@@ -485,7 +1163,7 @@ void testDiffPatchJson(){
             printf("attachmentFTOLinks[%d]: %s\n",i,mydata->attachmentFTOLinks[i]);
         }
     }
-    
+
     //  DataHolder
     printf("ver_keeped: %d\n",mydata->content->versionKeeped);
 
@@ -501,15 +1179,40 @@ void testDiffPatchJson(){
         if(mydc->timeStamp != NULL)
             printf("timeStamp: %s\n",mydc->timeStamp->timeStampCode);
         
-        printf("schemaCode: %d\n",mydc->objContent->schemaCode);
-        printf("byteCount: %d\n",mydc->objContent->byteCount);
-        printf("data: %s\n",mydc->objContent->data);
+        if(mydc->minusPatch != NULL){
+            printf("< minus >\n");
+            printf("schemaCode: %d\n",mydc->minusPatch->schemaCode);
+            printf("byteCount: %d\n",mydc->minusPatch->byteCount);
+            printf("data: %s\n",mydc->minusPatch->data);
+        }
+        if(mydc->plusPatch != NULL){
+            printf("< plus >\n");
+            printf("schemaCode: %d\n",mydc->plusPatch->schemaCode);
+            printf("byteCount: %d\n",mydc->plusPatch->byteCount);
+            printf("data: %s\n",mydc->plusPatch->data);
+        }
+        if(mydc->fullContent != NULL){
+            printf("< full >\n");
+            printf("schemaCode: %d\n",mydc->fullContent->schemaCode);
+            printf("byteCount: %d\n",mydc->fullContent->byteCount);
+            printf("data: %s\n",mydc->fullContent->data);
+        }
         i++;
     }
 
-    printf("\ndata_current: %s\n",mydata->content->current->objContent->data);
-    printf("data_head: %s\n",mydata->content->head->objContent->data);
-    printf("data_lastestCommon: %s\n",mydata->content->lastestCommon->objContent->data);
+    printf("\ndata_current: %s\n",mydata->content->current->fullContent->data);
+    printf("data_head: %s\n",mydata->content->head->fullContent->data);
+    printf("data_lastestCommon: %s\n",mydata->content->lastestCommon->fullContent->data);   // temp
+    
+    string s_reVer = getPatch(mydata->content->head->fullContent->data, mydata->content->head->preVersion->minusPatch->data);
+    printf("reverse ver1: %s\n",s_reVer.c_str());
+
+    string s_diff = getDiff((char*)name[2], (char*)name[1]);
+    char* res_diff = strdup(s_diff.c_str());
+    
+    printf("\nres_diff: %s\n",res_diff);
+    setNewDataDiffWithTag(mydata, "name", res_diff);
+    printf("data_head: %s\n",mydata->content->head->fullContent->data);
     
 }
 
